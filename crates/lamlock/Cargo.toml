@@ -14,7 +14,11 @@ readme = "README.md"
 nightly = []
 
 [dependencies]
-rustix = { version = "1.0.7", default-features = false, features = ["thread"] }
+linux-raw-sys = { version = "0.12.1", default-features = false, features = [
+    "general",
+    "no_std",
+] }
+syscalls = { version = "0.8.1", default-features = false }
 
 [[bench]]
 name = "lamlock-bench"
