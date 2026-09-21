@@ -23,3 +23,8 @@ target
 perf.data
 perf.data.old
 flamegraph.svg
+
+# Local direnv and Nix state
+/.envrc
+/.direnv/
+/flake.lock
