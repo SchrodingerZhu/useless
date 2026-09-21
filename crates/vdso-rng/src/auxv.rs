@@ -1,7 +1,7 @@
 use core::{ffi::c_ulong, mem::size_of};
 
 use alloc::boxed::Box;
-use linux_raw_sys::general::AT_NULL;
+use linux_raw_sys::auxvec::AT_NULL;
 use linux_raw_sys::prctl::PR_GET_AUXV;
 use syscalls::{Sysno, syscall};
 
@@ -65,7 +65,7 @@ impl<'a> Iterator for AuxvIter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use linux_raw_sys::general::AT_RANDOM;
+    use linux_raw_sys::auxvec::AT_RANDOM;
 
     use super::*;
     #[test]

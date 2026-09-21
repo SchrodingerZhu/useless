@@ -237,7 +237,7 @@ pub fn get_function_and_page_size() -> Option<(VdsoFunc, usize)> {
     let mut func = None;
     let mut page_size = None;
     for entry in auxv.iter() {
-        if entry.key == linux_raw_sys::general::AT_SYSINFO_EHDR.into() {
+        if entry.key == linux_raw_sys::auxvec::AT_SYSINFO_EHDR.into() {
             unsafe {
                 let ehdr = NonNull::new(entry.value as *mut Elf_Ehdr)?;
                 let shdr = ElfShdrArray::load(ehdr)?;
@@ -247,7 +247,7 @@ pub fn get_function_and_page_size() -> Option<(VdsoFunc, usize)> {
                 func = symbol_table.find_symbol();
             }
         }
-        if entry.key == linux_raw_sys::general::AT_PAGESZ.into() {
+        if entry.key == linux_raw_sys::auxvec::AT_PAGESZ.into() {
             page_size = Some(entry.value as usize);
         }
     }

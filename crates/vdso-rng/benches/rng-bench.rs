@@ -35,20 +35,34 @@ fn fill_getrandom(mut buf: &mut [u8]) {
     }
 }
 fn fill_with_rand_chacha20(buf: &mut [u8]) {
-    use rand::RngCore;
-    use rand::rngs::OsRng;
-    use rand::rngs::ReseedingRng;
-    use rand_chacha::ChaCha20Core;
-    use std::cell::RefCell;
+    use rand::rngs::SysRng;
+    use rand::{Rng, SeedableRng};
+    use rand_chacha::ChaCha20Rng;
+
+    const RESEED_BYTES: usize = 16 * 1024;
 
     thread_local! {
-        static TLS_RNG: RefCell<ReseedingRng<ChaCha20Core, OsRng>> = RefCell::new(
-            ReseedingRng::<ChaCha20Core, _>::new(16 * 1024, OsRng).unwrap()
-        );
+        static TLS_RNG: RefCell<(ChaCha20Rng, usize)> = RefCell::new((
+            ChaCha20Rng::try_from_rng(&mut SysRng).unwrap(),
+            RESEED_BYTES,
+        ));
     }
 
     TLS_RNG.with(|rng| {
-        rng.borrow_mut().fill_bytes(buf);
+        let mut buf = buf;
+        let mut state = rng.borrow_mut();
+        let (rng, remaining) = &mut *state;
+        while !buf.is_empty() {
+            if *remaining == 0 {
+                *rng = ChaCha20Rng::try_from_rng(&mut SysRng).unwrap();
+                *remaining = RESEED_BYTES;
+            }
+            let len = buf.len().min(*remaining);
+            let (chunk, rest) = buf.split_at_mut(len);
+            rng.fill_bytes(chunk);
+            *remaining -= len;
+            buf = rest;
+        }
     });
 }
 
