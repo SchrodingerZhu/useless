@@ -7,7 +7,6 @@ description = "A Rust wrapper around the Linux vDSO random number generator."
 license = "MIT OR Apache-2.0"
 keywords = ["vDSO", "linux", "random", "synchronization"]
 categories = ["concurrency", "data-structures", "no-std"]
-homepage = "https://github.com/schrodingerzhu/useless"
 repository = "https://github.com/schrodingerzhu/useless"
 readme = "README.md"
 
