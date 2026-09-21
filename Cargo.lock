@@ -437,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "lamlock"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "criterion",
  "rustix",
@@ -576,7 +576,7 @@ checksum = "19e6dac6a1700781e085eb816eafdefd74ca7acd4a1f356d1ebcd9af441aa100"
 
 [[package]]
 name = "punyenc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "ftree",
@@ -850,7 +850,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "vdso-rng"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "criterion",
  "crossbeam-queue",
