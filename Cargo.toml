@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/lamlock", "crates/vdso-rng"]
+members = ["crates/lamlock", "crates/punyenc", "crates/vdso-rng"]
 
 [profile.bench]
 opt-level = 3
