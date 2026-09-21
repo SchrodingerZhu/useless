@@ -48,15 +48,15 @@ Instead of requiring each thread to signal the next, the combiner handles notifi
 
 ## Does it handle panics?
 
-Yes. If a panic occurs during a critical section, the combiner marks the lock as poisoned. All waiting threads are notified.  
-With the default `std` feature, the combiner catches unwinding panics and transfers each payload to the thread that submitted the failing task. That thread resumes the panic from `Lock::run()`, without invoking the panic hook again. The hook and the failing closure's destructors run on the combiner thread.
+There are two lock types: `nonpoison::Lock<T>` and `poison::Lock<T>`. The existing `lamlock::Lock<T>` name refers to the poisoning type, which wraps the nonpoisoning lock and checks a poison flag inside each scheduled task.
 
-Tasks that already completed keep their results, including the combiner's own task. Tasks that have not started return `LockPoisoned`; their closures are dropped on their requesting threads. Aborting panics cannot be caught.
+With the default `std` feature, the combiner catches unwinding panics and transfers each payload to the thread that submitted the failing task. That thread resumes the panic from `Lock::run()`, without invoking the panic hook again. The hook and the failing closure's destructors run on the combiner thread. The uncontended fast path calls the closure directly and uses an unlock guard, without catching the panic.
 
-Poisoning is permanent: subsequent calls to `Lock::run()` return `LockPoisoned` without running the closure.
-With exclusive access to the lock, `Lock::get_mut()` still provides access to the data for cleanup. It does not clear poison or repair data left inconsistent by a panic.
+Tasks that already completed keep their results, including the combiner's own task. A nonpoisoning lock continues executing subsequent tasks, and `run()` returns their results directly. A poisoning lock returns `LockPoisoned` for later tasks without invoking their closures; rejected closures are dropped on the thread executing their wrappers. Aborting panics cannot be caught.
 
-Disable default features to use `lamlock` without `std`. In that configuration, unwinding panics propagate on the executing thread, which may be another task's requester. Panic transport for custom `no_std` runtimes is not yet supported.
+`poison::Lock::try_unpoison()` schedules a recovery closure that runs only when the lock is poisoned. Returning `true` clears poison; returning `false` or panicking leaves it set. With exclusive access to either lock type, `Lock::get_mut()` also provides access to the data for cleanup, without clearing poison.
+
+Disable default features to use `lamlock` without `std`. In that configuration, unwinding panics propagate on the executing thread, which may be another task's requester. The heavy bomb remains installed for an uncaught combiner panic: it disables the raw lock and cancels the remaining queue. The poisoning wrapper returns `LockPoisoned` to affected requesters; the nonpoisoning API panics when its task cannot execute. A direct fast-path panic releases the raw lock normally. Panic transport for custom `no_std` runtimes is not yet supported.
 
 ---
 

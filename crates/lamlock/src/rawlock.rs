@@ -3,10 +3,17 @@ use core::{
     sync::atomic::{AtomicPtr, AtomicU32, Ordering},
 };
 
-use crate::{LockPoisoned, LockResult, node::Node};
+use crate::node::Node;
+
+// Without a catcher, an unwinding combiner must still cancel its queue.
+#[cfg(feature = "std")]
+pub type QueueError = core::convert::Infallible;
+#[cfg(not(feature = "std"))]
+pub type QueueError = crate::LockPoisoned;
 
 const UNLOCKED: u32 = 0;
 const LOCKED: u32 = 1;
+#[cfg(not(feature = "std"))]
 const POISONED: u32 = 2;
 
 pub struct RawLock {
@@ -20,10 +27,6 @@ impl RawLock {
             status: AtomicU32::new(0),
             tail: AtomicPtr::new(core::ptr::null_mut()),
         }
-    }
-
-    pub fn poison(&self) {
-        self.status.store(POISONED, Ordering::Release);
     }
 
     pub fn has_tail(&self, ordering: Ordering) -> bool {
@@ -45,34 +48,31 @@ impl RawLock {
             )
             .is_ok()
     }
-    pub fn try_acquire(&self) -> LockResult<bool> {
+    pub fn try_acquire(&self) -> Result<bool, QueueError> {
         match self
             .status
             .compare_exchange(UNLOCKED, LOCKED, Ordering::Acquire, Ordering::Relaxed)
         {
             Ok(_) => Ok(true),
-            Err(LOCKED) => Ok(false),
-            Err(_) => Err(LockPoisoned),
+            #[cfg(not(feature = "std"))]
+            Err(POISONED) => Err(crate::LockPoisoned),
+            Err(_) => Ok(false),
         }
     }
-    pub fn acquire(&self) -> LockResult<()> {
-        loop {
-            match self.status.compare_exchange(
-                UNLOCKED,
-                LOCKED,
-                Ordering::Acquire,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return Ok(()),
-                Err(LOCKED) => {
-                    while self.status.load(Ordering::Relaxed) == LOCKED {
-                        core::hint::spin_loop();
-                    }
-                }
-                Err(_) => return Err(LockPoisoned),
+    pub fn acquire(&self) -> Result<(), QueueError> {
+        while !self.try_acquire()? {
+            while self.status.load(Ordering::Relaxed) == LOCKED {
+                core::hint::spin_loop();
             }
         }
+        Ok(())
     }
+
+    #[cfg(not(feature = "std"))]
+    pub fn poison(&self) {
+        self.status.store(POISONED, Ordering::Release);
+    }
+
     pub fn release(&self) {
         self.status.store(UNLOCKED, Ordering::Release);
     }
@@ -80,10 +80,5 @@ impl RawLock {
     #[cfg(test)]
     pub fn tail_for_test(&self) -> *mut Node {
         self.tail.load(Ordering::Acquire)
-    }
-
-    #[cfg(test)]
-    pub fn is_poisoned(&self, ordering: Ordering) -> bool {
-        self.status.load(ordering) == POISONED
     }
 }

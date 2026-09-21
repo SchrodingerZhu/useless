@@ -3,25 +3,31 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use crate::{LockResult, bomb::HeavyWeightBomb, futex, rawlock::RawLock};
+#[cfg(not(feature = "std"))]
+use crate::bomb::Bomb;
+use crate::{
+    futex,
+    rawlock::{QueueError, RawLock},
+};
 
 const SPIN_LIMIT: usize = 100;
 const WAITING: u32 = 0;
 const DONE: u32 = 1;
 const HEAD: u32 = 2;
 const SLEEPING: u32 = 3;
+#[cfg(not(feature = "std"))]
 pub(crate) const POISONED: u32 = 4;
 
 pub struct Node {
     futex: futex::Futex,
     next: AtomicPtr<Self>,
-    closure: unsafe fn(NonNull<Self>) -> bool,
+    closure: unsafe fn(NonNull<Self>),
 }
 
 impl Node {
     /// Creates a new `Node` with an initial state of `WAITING`.
     /// The `next` pointer is initialized to `null`.
-    pub const fn new(closure: unsafe fn(NonNull<Self>) -> bool) -> Self {
+    pub const fn new(closure: unsafe fn(NonNull<Self>)) -> Self {
         Self {
             futex: futex::Futex::new(WAITING),
             next: AtomicPtr::new(core::ptr::null_mut()),
@@ -59,7 +65,7 @@ impl Node {
         Self::wake(this, HEAD);
     }
 
-    /// Wake up the futex with `POISONED` message.
+    #[cfg(not(feature = "std"))]
     pub fn wake_as_poisoned(this: NonNull<Self>) {
         Self::wake(this, POISONED);
     }
@@ -85,10 +91,10 @@ impl Node {
         self.next.store(next.as_ptr(), Ordering::Release);
     }
 
-    /// Attach the node to a raw lock. Returns Ok if its callback completed
-    /// (including a caught panic), or Err if it was canceled without executing.
-    pub fn attach(this: NonNull<Self>, raw: &RawLock) -> LockResult<()> {
-        let mut bomb = HeavyWeightBomb::new(raw, this);
+    /// Attach the node to a raw lock and wait for its callback to complete.
+    pub fn attach(this: NonNull<Self>, raw: &RawLock) -> Result<(), QueueError> {
+        #[cfg(not(feature = "std"))]
+        let mut bomb = Bomb::new(raw, this);
         match raw.swap_tail(this) {
             Some(prev) => unsafe {
                 prev.as_ref().store_next(this);
@@ -103,11 +109,12 @@ impl Node {
                     status = this.as_ref().wait();
                 }
                 if status == DONE {
+                    #[cfg(not(feature = "std"))]
                     bomb.diffuse();
                     return Ok(());
                 }
+                #[cfg(not(feature = "std"))]
                 if status == POISONED {
-                    // defuse the bomb because we are not the head node.
                     bomb.diffuse();
                     return Err(crate::LockPoisoned);
                 }
@@ -115,16 +122,6 @@ impl Node {
             },
             None => {
                 // we are going to be the head node.
-                // If exiting early, we should trigger the bomb to propagate the poison.
-                // This is needed because of the following scenario:
-                // 1. Thread A graps the lock on fast path.
-                // 2. Thread B tries to grap the lock and enters the slow path, which
-                //    ends up spinning right here.
-                // 3. Thread C enters the queue and waiting for the lock.
-                // 4. Thread A panics, poisoning the lock.
-                // 5. Thread B wakes up only to find that the lock is poisoned.
-                // 6. Thread B needs to notify Thread C that the lock is poisoned.
-                // 7. Thread C needs to wake up and handle the poison.
                 raw.acquire()?;
             }
         }
@@ -134,17 +131,12 @@ impl Node {
             unsafe {
                 cursor.as_ref().prefetch_next(Ordering::Relaxed);
             }
-            if !unsafe { (cursor.as_ref().closure)(cursor) } {
-                // Its result slot contains the caught panic. Complete this node
-                // and cancel the remaining queue without executing more tasks.
-                bomb.set_current_completed(true);
-                drop(bomb);
-                return Ok(());
-            }
+            unsafe { (cursor.as_ref().closure)(cursor) };
             match unsafe { cursor.as_ref().load_next(Ordering::Acquire) } {
                 Some(next) => {
                     Node::wake_as_done(cursor);
                     cursor = next;
+                    #[cfg(not(feature = "std"))]
                     bomb.reset(cursor);
                 }
                 None => break,
@@ -155,6 +147,7 @@ impl Node {
             Node::wake_as_done(cursor);
 
             raw.release();
+            #[cfg(not(feature = "std"))]
             bomb.diffuse();
             return Ok(());
         }
@@ -164,6 +157,7 @@ impl Node {
                 Some(next) => {
                     Node::wake_as_head(next);
                     Node::wake_as_done(cursor);
+                    #[cfg(not(feature = "std"))]
                     bomb.diffuse();
                     return Ok(());
                 }
@@ -185,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_node_wait() {
-        let node = Node::new(|_| true);
+        let node = Node::new(|_| ());
         std::thread::scope(|s| {
             {
                 let node = &node;
@@ -200,12 +194,12 @@ mod tests {
 
     #[test]
     fn test_node_next() {
-        let node = Node::new(|_| true);
+        let node = Node::new(|_| ());
         std::thread::scope(|s| {
             {
                 let node = &node;
                 s.spawn(move || {
-                    let local_node = Node::new(|_| true);
+                    let local_node = Node::new(|_| ());
                     node.store_next(NonNull::from(&local_node));
                     assert_eq!(local_node.wait(), DONE);
                 });
@@ -249,7 +243,6 @@ mod tests {
                                     .0
                                     .set(container.as_ref().counter.0.get() + 1);
                             }
-                            true
                         }),
                         counter,
                     };
