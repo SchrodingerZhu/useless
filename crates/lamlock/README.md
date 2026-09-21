@@ -49,7 +49,14 @@ Instead of requiring each thread to signal the next, the combiner handles notifi
 ## Does it handle panics?
 
 Yes. If a panic occurs during a critical section, the combiner marks the lock as poisoned. All waiting threads are notified.  
-You can check for poison and recover by calling `Lock::inspect_poison()`.
+With the default `std` feature, the combiner catches unwinding panics and transfers each payload to the thread that submitted the failing task. That thread resumes the panic from `Lock::run()`, without invoking the panic hook again. The hook and the failing closure's destructors run on the combiner thread.
+
+Tasks that already completed keep their results, including the combiner's own task. Tasks that have not started return `LockPoisoned`; their closures are dropped on their requesting threads. Aborting panics cannot be caught.
+
+Poisoning is permanent: subsequent calls to `Lock::run()` return `LockPoisoned` without running the closure.
+With exclusive access to the lock, `Lock::get_mut()` still provides access to the data for cleanup. It does not clear poison or repair data left inconsistent by a panic.
+
+Disable default features to use `lamlock` without `std`. In that configuration, unwinding panics propagate on the executing thread, which may be another task's requester. Panic transport for custom `no_std` runtimes is not yet supported.
 
 ---
 

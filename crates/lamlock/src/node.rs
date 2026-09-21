@@ -15,13 +15,13 @@ pub(crate) const POISONED: u32 = 4;
 pub struct Node {
     futex: futex::Futex,
     next: AtomicPtr<Self>,
-    closure: unsafe fn(NonNull<Self>),
+    closure: unsafe fn(NonNull<Self>) -> bool,
 }
 
 impl Node {
     /// Creates a new `Node` with an initial state of `WAITING`.
     /// The `next` pointer is initialized to `null`.
-    pub const fn new(closure: unsafe fn(NonNull<Self>)) -> Self {
+    pub const fn new(closure: unsafe fn(NonNull<Self>) -> bool) -> Self {
         Self {
             futex: futex::Futex::new(WAITING),
             next: AtomicPtr::new(core::ptr::null_mut()),
@@ -77,7 +77,7 @@ impl Node {
     #[cfg(all(feature = "nightly", not(miri)))]
     pub unsafe fn prefetch_next(&self, ordering: Ordering) {
         let ptr = self.next.load(ordering);
-        unsafe { core::intrinsics::prefetch_write_data(ptr, 3) };
+        core::intrinsics::prefetch_write_data::<_, 3>(ptr);
     }
 
     /// Store the next node in the linked list.
@@ -85,7 +85,8 @@ impl Node {
         self.next.store(next.as_ptr(), Ordering::Release);
     }
 
-    /// Attach the node to a raw lock.
+    /// Attach the node to a raw lock. Returns Ok if its callback completed
+    /// (including a caught panic), or Err if it was canceled without executing.
     pub fn attach(this: NonNull<Self>, raw: &RawLock) -> LockResult<()> {
         let mut bomb = HeavyWeightBomb::new(raw, this);
         match raw.swap_tail(this) {
@@ -133,8 +134,12 @@ impl Node {
             unsafe {
                 cursor.as_ref().prefetch_next(Ordering::Relaxed);
             }
-            unsafe {
-                (cursor.as_ref().closure)(cursor);
+            if !unsafe { (cursor.as_ref().closure)(cursor) } {
+                // Its result slot contains the caught panic. Complete this node
+                // and cancel the remaining queue without executing more tasks.
+                bomb.set_current_completed(true);
+                drop(bomb);
+                return Ok(());
             }
             match unsafe { cursor.as_ref().load_next(Ordering::Acquire) } {
                 Some(next) => {
@@ -180,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_node_wait() {
-        let node = Node::new(|_| {});
+        let node = Node::new(|_| true);
         std::thread::scope(|s| {
             {
                 let node = &node;
@@ -195,12 +200,12 @@ mod tests {
 
     #[test]
     fn test_node_next() {
-        let node = Node::new(|_| {});
+        let node = Node::new(|_| true);
         std::thread::scope(|s| {
             {
                 let node = &node;
                 s.spawn(move || {
-                    let local_node = Node::new(|_| {});
+                    let local_node = Node::new(|_| true);
                     node.store_next(NonNull::from(&local_node));
                     assert_eq!(local_node.wait(), DONE);
                 });
@@ -244,6 +249,7 @@ mod tests {
                                     .0
                                     .set(container.as_ref().counter.0.get() + 1);
                             }
+                            true
                         }),
                         counter,
                     };

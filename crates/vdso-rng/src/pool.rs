@@ -105,7 +105,6 @@ impl Pool {
 
 impl Drop for Pool {
     fn drop(&mut self) {
-        _ = self.mmaps.poison();
         #[cfg(debug_assertions)]
         let mut counter = 0;
         while self.freelist.pop().is_some() {
@@ -114,20 +113,16 @@ impl Drop for Pool {
                 counter += 1;
             }
         }
-        _ = self.mmaps.inspect_poison(|mmaps| {
-            #[cfg(debug_assertions)]
-            debug_assert_eq!(
-                counter,
-                self.config.pages_per_block * self.config.states_per_page * mmaps.len(),
-                "Freelist should contain all states from all mmaps"
-            );
-            for ptr in mmaps.drain(..) {
-                unsafe {
-                    utils::munmap(ptr.0, self.config.page_size * self.config.pages_per_block)
-                };
-            }
-            core::ops::ControlFlow::Continue(())
-        });
+        let mmaps = self.mmaps.get_mut();
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
+            counter,
+            self.config.pages_per_block * self.config.states_per_page * mmaps.len(),
+            "Freelist should contain all states from all mmaps"
+        );
+        for ptr in mmaps.drain(..) {
+            unsafe { utils::munmap(ptr.0, self.config.page_size * self.config.pages_per_block) };
+        }
     }
 }
 

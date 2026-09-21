@@ -1,6 +1,6 @@
 [package]
 name = "lamlock"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 authors = ["schrodingerzhu <yifanzhu@rochester.edu>"]
 description = "MCS-style flat-combining mutex with panic-awareness"
@@ -11,6 +11,8 @@ repository = "https://github.com/schrodingerzhu/useless"
 readme = "README.md"
 
 [features]
+default = ["std"]
+std = []
 nightly = []
 
 [dependencies]

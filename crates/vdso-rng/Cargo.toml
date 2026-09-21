@@ -1,6 +1,6 @@
 [package]
 name = "vdso-rng"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 authors = ["schrodingerzhu <yifanzhu@rochester.edu>"]
 description = "A Rust wrapper around the Linux vDSO random number generator."
@@ -22,7 +22,7 @@ linux-raw-sys = { version = "0.12.1", default-features = false, features = [
     "errno",
 ] }
 syscalls = { version = "0.8.1", default-features = false }
-lamlock = { path = "../lamlock", version = "0.2.1" }
+lamlock = { path = "../lamlock", version = "0.3.0", default-features = false }
 crossbeam-queue = { version = "0.3.12", default-features = false, features = [
     "alloc",
 ] }

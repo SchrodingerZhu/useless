@@ -30,6 +30,7 @@ impl<'a> Drop for LightWeightBomb<'a> {
 pub struct HeavyWeightBomb<'a> {
     ignitor: ManuallyDrop<LightWeightBomb<'a>>,
     atom: NonNull<Node>,
+    current_completed: bool,
 }
 
 impl<'a> Drop for HeavyWeightBomb<'a> {
@@ -42,13 +43,22 @@ impl<'a> Drop for HeavyWeightBomb<'a> {
             let next = unsafe { self.atom.as_ref().load_next(Ordering::Acquire) };
             // If the next node is not null, we wake it up and continue to the next iteration.
             if let Some(next) = next {
-                Node::wake_as_poisoned(self.atom);
+                if self.current_completed {
+                    Node::wake_as_done(self.atom);
+                } else {
+                    Node::wake_as_poisoned(self.atom);
+                }
                 self.atom = next;
+                self.current_completed = false;
                 continue;
             }
             // If we successfully closed the tail, we can stop after waking the last node.
             if self.ignitor.get_raw().try_close(self.atom) {
-                Node::wake_as_poisoned(self.atom);
+                if self.current_completed {
+                    Node::wake_as_done(self.atom);
+                } else {
+                    Node::wake_as_poisoned(self.atom);
+                }
                 break;
             }
             // Otherwise, we know that the next will be updated since there are nodes waiting.
@@ -66,13 +76,18 @@ impl<'a> HeavyWeightBomb<'a> {
         Self {
             ignitor: ManuallyDrop::new(LightWeightBomb::new(lock)),
             atom,
+            current_completed: false,
         }
     }
     pub fn diffuse(self) {
         core::mem::forget(self);
     }
+    pub fn set_current_completed(&mut self, completed: bool) {
+        self.current_completed = completed;
+    }
     pub fn reset(&mut self, new_atom: NonNull<Node>) {
         self.atom = new_atom;
+        self.current_completed = false;
     }
 }
 
@@ -118,7 +133,7 @@ mod tests {
                 s.spawn({
                     let raw = raw;
                     move || {
-                        let node = Node::new(|_| {});
+                        let node = Node::new(|_| true);
                         let this = NonNull::from(&node);
                         if let Some(prev) = raw.swap_tail(this) {
                             unsafe {
