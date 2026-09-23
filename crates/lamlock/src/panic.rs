@@ -20,14 +20,8 @@ pub fn catch<F: FnOnce() -> R + UnwindSafe, R>(f: F) -> Result<R, Payload> {
     }
 }
 
+#[cfg(feature = "std")]
 #[cold]
 pub fn resume(payload: Payload) -> ! {
-    #[cfg(feature = "std")]
-    {
-        std::panic::resume_unwind(payload)
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        match payload {}
-    }
+    std::panic::resume_unwind(payload)
 }

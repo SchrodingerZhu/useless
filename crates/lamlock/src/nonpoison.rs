@@ -66,7 +66,7 @@ impl<T> Lock<T> {
             }));
             unsafe { this.as_ref().result.set(MaybeUninit::new(result)) };
         }
-        let mut combined_node = CombinedNode {
+        let combined_node = CombinedNode {
             node: Node::new(execute::<T, F, R>),
             closure: MaybeUninit::new(f),
             #[cfg(not(feature = "std"))]
@@ -75,12 +75,15 @@ impl<T> Lock<T> {
             result: Cell::new(MaybeUninit::uninit()),
         };
         let this = NonNull::from(&combined_node).cast();
+        #[cfg(feature = "std")]
+        Node::attach(this, &self.raw)?;
+        #[cfg(not(feature = "std"))]
         if let Err(cancelled) = Node::attach(this, &self.raw) {
-            #[cfg(not(feature = "std"))]
             if combined_node.started.get() {
                 return Err(cancelled);
             }
             // The node is detached; drop only a closure that was not consumed.
+            let mut combined_node = combined_node;
             unsafe { combined_node.closure.assume_init_drop() };
             return Err(cancelled);
         }
@@ -89,7 +92,10 @@ impl<T> Lock<T> {
         // the write, and no other thread accesses this node after attach returns.
         match unsafe { combined_node.result.into_inner().assume_init() } {
             Ok(result) => Ok(result),
+            #[cfg(feature = "std")]
             Err(payload) => panic::resume(payload),
+            #[cfg(not(feature = "std"))]
+            Err(payload) => match payload {},
         }
     }
 
